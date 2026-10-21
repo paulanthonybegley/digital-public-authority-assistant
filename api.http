@@ -1,0 +1,334 @@
+### Digitale Behörden-Assistenz — API test sequence
+### REST Client (VS Code / JetBrains) — send the requests in order.
+###
+### Base URL defaults to the Docker stack. For local dev, switch `@baseUrl`
+### to http://localhost:8080 (the Vite dev server also proxies /api).
+
+@baseUrl = http://localhost:3000
+@now = 2026-10-17T15:00:00Z
+@reqId = test-0001
+
+# =====================================================================
+# 0 · SERVICE PROBES
+# =====================================================================
+
+### 0.1 Liveness — always 200, never touches dependencies
+# @name health
+GET {{baseUrl}}/health
+
+### 0.2 Readiness — 503 if Postgres or Redis is unreachable
+# @name ready
+GET {{baseUrl}}/ready
+
+# =====================================================================
+# 1 · TASK 1 — GDPR REDACTION (mask PII)
+# =====================================================================
+
+### 1.1 All three categories at once
+# @name redact_all
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+X-Request-Id: {{reqId}}
+
+{
+  "text": "Sehr geehrte Damen und Herren,\nIhre Bewerbung unter max.mustermann@example.de wurde geprueft.\nDie Ueberweisung (DE89 3704 0044 0532 0130 00) ist eingegangen.\nBitte rufen Sie unter 030/1234567 oder +49 30 12345678 an."
+}
+
+### 1.2 Compact IBAN (no spaces)
+# @name redact_compact_iban
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+
+{
+  "text": "Zahlung per DE89370400440532013000 erfolgt."
+}
+
+### 1.3 Mobile number + plus-addressed e-mail
+# @name redact_mobile
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+
+{
+  "text": "Mobil 0170 1234567, E-Mail a.b+tag@mail.example.co.uk"
+}
+
+### 1.4 Clean text — expect zero redactions and identical output
+# @name redact_clean
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+
+{
+  "text": "Aktenzeichen AZ-2026/0042, Datum 2026-05-01, Betrag 1.234,56 EUR"
+}
+
+### 1.5 Empty text — must not fail
+# @name redact_empty
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+
+{
+  "text": ""
+}
+
+### 1.6 ERROR: missing "text" field → 400
+# @name redact_missing_field
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+
+{}
+
+### 1.7 ERROR: malformed JSON body → 400
+# @name redact_bad_json
+POST {{baseUrl}}/api/v1/redact
+Content-Type: application/json
+
+this is not json
+
+# =====================================================================
+# 2 · TASK 2 — STATUTORY DEADLINE CALCULATION
+# =====================================================================
+
+### 2.1 Plain weekday — no shift expected
+# @name deadline_weekday
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-01-05",
+  "days_to_add": 3,
+  "federal_state": "BE",
+  "counting": "calendar"
+}
+
+### 2.2 Friday → rolls over the weekend to Monday
+# @name deadline_weekend
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-01-02",
+  "days_to_add": 1,
+  "federal_state": "BE",
+  "counting": "calendar"
+}
+
+### 2.3 Labour Day (Fri 2026-05-01) → holiday + weekend → Mon 04.05.
+# @name deadline_holiday
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-04-30",
+  "days_to_add": 1,
+  "federal_state": "BE",
+  "counting": "calendar"
+}
+
+### 2.4 Year-end transition: 31.12. + 1 day → New Year holiday → 02.01.
+# @name deadline_year_end
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2025-12-31",
+  "days_to_add": 1,
+  "federal_state": "BE",
+  "counting": "calendar"
+}
+
+### 2.5 Business-day counting — weekends and holidays skipped while counting
+# @name deadline_business
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-04-30",
+  "days_to_add": 1,
+  "federal_state": "BE",
+  "counting": "business"
+}
+
+### 2.6 Repeat 2.3 immediately — expect "cached": true (Redis)
+# @name deadline_cached
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-04-30",
+  "days_to_add": 1,
+  "federal_state": "BE",
+  "counting": "calendar"
+}
+
+### 2.7 ERROR: German date format → 400
+# @name deadline_bad_date
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "31.12.2025",
+  "days_to_add": 1,
+  "federal_state": "BE"
+}
+
+### 2.8 ERROR: impossible date (30 February) → 400
+# @name deadline_impossible_date
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-02-30",
+  "days_to_add": 1,
+  "federal_state": "BE"
+}
+
+### 2.9 ERROR: unknown federal state → 422
+# @name deadline_bad_state
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2025-12-31",
+  "days_to_add": 1,
+  "federal_state": "XX"
+}
+
+### 2.10 ERROR: negative days → 422
+# @name deadline_negative_days
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2025-12-31",
+  "days_to_add": -3,
+  "federal_state": "BE"
+}
+
+# =====================================================================
+# 3 · PUBLIC HOLIDAYS (supporting endpoint)
+# =====================================================================
+
+### 3.1 Bavaria — must include Epiphany, Corpus Christi, All Saints
+# @name holidays_by
+GET {{baseUrl}}/api/v1/holidays?year=2026&state=BY
+
+### 3.2 Lower Saxony — must NOT include Epiphany/Reformation Day
+# @name holidays_ni
+GET {{baseUrl}}/api/v1/holidays?year=2026&state=NI
+
+### 3.3 Default year, default state
+# @name holidays_default
+GET {{baseUrl}}/api/v1/holidays
+
+### 3.4 ERROR: invalid state code → 422
+# @name holidays_bad_state
+GET {{baseUrl}}/api/v1/holidays?year=2026&state=XX
+
+# =====================================================================
+# 4 · TASK 3 — COMPLIANCE / MASTER DATA CHECKS
+# =====================================================================
+
+### 4.1 Valid VAT ID (mod-11 check digit 8) + valid register number
+# @name compliance_valid
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "tax_id": "DE123456788",
+  "register_number": "HRB 12345 B"
+}
+
+### 4.2 VAT ID with separators and lowercase — must normalize
+# @name compliance_normalized
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "tax_id": "  de123.456.78 8 "
+}
+
+### 4.3 ERROR: wrong check digit → valid:false, invalid_check_digit
+# @name compliance_bad_check_digit
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "tax_id": "DE123456789"
+}
+
+### 4.4 ERROR: check digit 0 is forbidden by the mod-11 rule
+# @name compliance_check_digit_zero
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "tax_id": "DE111111110"
+}
+
+### 4.5 ERROR: wrong format (only 8 digits) → invalid_format
+# @name compliance_bad_format
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "tax_id": "DE12345678"
+}
+
+### 4.6 Non-German VAT ID → invalid_format
+# @name compliance_foreign
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "tax_id": "ATU12345678"
+}
+
+### 4.7 Register number variants — flexible spacing/case
+# @name compliance_register_variants
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "register_number": "hrb12345b"
+}
+
+### 4.8 ERROR: malformed register number → invalid_format
+# @name compliance_register_bad
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{
+  "register_number": "XYZ 12345"
+}
+
+### 4.9 ERROR: neither field provided → 400
+# @name compliance_empty
+POST {{baseUrl}}/api/v1/compliance/validate
+Content-Type: application/json
+
+{}
+
+# =====================================================================
+# 5 · PLATFORM BEHAVIOUR
+# =====================================================================
+
+### 5.1 Unknown route → 404
+# @name not_found
+GET {{baseUrl}}/api/v1/does-not-exist
+
+### 5.2 Request-id propagation — response must echo X-Request-Id
+# @name request_id
+GET {{baseUrl}}/health
+X-Request-Id: my-trace-id-42
+
+### 5.3 Rate limiting — send repeatedly; after 120/min expect 429
+###     (headers: X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After)
+# @name rate_limit
+POST {{baseUrl}}/api/v1/deadline
+Content-Type: application/json
+
+{
+  "start_date": "2026-01-02",
+  "days_to_add": 1,
+  "federal_state": "BE"
+}

@@ -1,0 +1,32 @@
+BUILD A CUSTOM SYSTEM FOR YOUR CLASS
+
+Give Al the design inputs. Get learning experiences that fit your learners.
+
+Learning goal
+Clarifies what success looks like so the system can align every part of the lesson.
+
+Lesson sequence
+Sets the flow and pacing so the system can organize learning in a logical, manageable way.
+
+Assessment evidence
+Defines how learning will be shown so the system can build matching checks for understanding.
+
+Learner profile
+Shares who your learners are so the system can match content and approaches to them.
+
+A lesson plan is a system, not a prompt.
+
+Prior knowledge
+Reveals what learners already know so the system can build on it and avoid gaps and repetition.
+
+Learning activities
+Names the tasks learners will do so the system can choose the right activities to meet the goal.
+
+Output requirements
+Specifies the formats and constraints so the system delivers exactly what you need, ready to use.
+
+Accessibility & supports
+Highlights needs and supports so the system plans inclusive options for every learner.
+
+Teacher decisions
+Shares your preferences and priorities so the system adapts to your style and context.
